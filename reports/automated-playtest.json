@@ -1,0 +1,60 @@
+{
+  "type": "automated traversal; not human playtesting",
+  "reports": [
+    {
+      "seed": "playtest-1",
+      "completed": true,
+      "moves": 34,
+      "backtracks": 10,
+      "minimumMoves": 14,
+      "decisionCells": 11,
+      "falseBranches": 10,
+      "maxFalseDepth": 5,
+      "validPaths": "12"
+    },
+    {
+      "seed": "playtest-2",
+      "completed": true,
+      "moves": 36,
+      "backtracks": 11,
+      "minimumMoves": 14,
+      "decisionCells": 8,
+      "falseBranches": 8,
+      "maxFalseDepth": 4,
+      "validPaths": "8"
+    },
+    {
+      "seed": "playtest-3",
+      "completed": true,
+      "moves": 26,
+      "backtracks": 6,
+      "minimumMoves": 14,
+      "decisionCells": 11,
+      "falseBranches": 7,
+      "maxFalseDepth": 5,
+      "validPaths": "16"
+    },
+    {
+      "seed": "playtest-4",
+      "completed": true,
+      "moves": 20,
+      "backtracks": 3,
+      "minimumMoves": 14,
+      "decisionCells": 12,
+      "falseBranches": 6,
+      "maxFalseDepth": 6,
+      "validPaths": "18"
+    },
+    {
+      "seed": "playtest-5",
+      "completed": true,
+      "moves": 36,
+      "backtracks": 11,
+      "minimumMoves": 14,
+      "decisionCells": 7,
+      "falseBranches": 7,
+      "maxFalseDepth": 5,
+      "validPaths": "2"
+    }
+  ]
+}
