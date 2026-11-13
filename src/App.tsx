@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { SCOUT_REACH } from './rendering/scouting';
+import FlatBoard from './rendering/FlatBoard';
+import RendererControls, { type RendererMode } from './rendering/RendererControls';
+import { DEFAULT_SPHERE } from './rendering/projection';
+const SphereBoard = lazy(() => import('./rendering/SphereBoard'));
+const NavigationProbe = lazy(() => import('./rendering/NavigationProbe'));
 import { generate } from './engine/generator';
 import { analyze } from './engine/solver';
 import { elapsed, moveKind } from './engine/game';
@@ -28,6 +34,9 @@ export default function App() {
   const [attempt, setAttempt] = useState(() => newAttempt(puzzle));
   const { game, mistakes, failure } = attempt;
   const [now, setNow] = useState(Date.now());
+  const [rendererMode, setRendererMode] = useState<RendererMode>('flat');
+  const [sphereSettings, setSphereSettings] = useState({ ...DEFAULT_SPHERE });
+  const [probe, setProbe] = useState(false);
   const [developer, setDeveloper] = useState(false);
   const [help, setHelp] = useState(false);
   const [reveal, setReveal] = useState(false);
@@ -45,14 +54,21 @@ export default function App() {
   const analysis = useMemo(() => analyze(puzzle), [puzzle]);
   const activeId = game.path[game.path.length - 1], active = puzzle.cells[activeId];
   const previous = game.path[game.path.length - 2];
-  const viewRadius = settings.visibleRings + Number(scouting);
+  const viewRadius = settings.visibleRings + Number(scouting && rendererMode === 'flat');
   const visible = viewCells(puzzle, activeId, viewRadius);
-  const boardScale = Math.max(1, (viewRadius + 0.6) / 2.6);
   const selectedSolution = analysis.solutions[solutionIndex] || [];
   const solution = new Set(selectedSolution);
   const complete = game.finishedAt !== null;
   const ended = complete || failure !== null;
   const limit = timeLimit(settings.gameOver);
+  const boardCells = useMemo(() => viewCells(puzzle, activeId, viewRadius).map(cell => ({ ...cell,
+    active: key(cell) === activeId, kind: ended ? null : moveKind(puzzle, game, key(cell)),
+    visited: game.path.includes(key(cell)), solution: reveal && selectedSolution.includes(key(cell)),
+  })), [puzzle, activeId, viewRadius, ended, game, reveal, selectedSolution]);
+  const scoutCells = useMemo(() => viewCells(puzzle, activeId, settings.visibleRings + SCOUT_REACH).map(cell => ({ ...cell,
+    active: key(cell) === activeId, kind: null,
+    visited: game.path.includes(key(cell)), solution: reveal && selectedSolution.includes(key(cell)),
+  })), [puzzle, activeId, settings.visibleRings, game, reveal, selectedSolution]);
   const legalNext = visible.filter(h => moveKind(puzzle, game, key(h)) === 'forward');
   const ms = elapsed(game, failure?.at ?? now);
   const remaining = limit === null ? null : Math.max(0, limit - ms);
@@ -99,6 +115,13 @@ export default function App() {
     if (checked.failure || checked.game.finishedAt !== null) { setAttempt(checked); setNow(t); return; }
     setScoutState(s => toggleScout(s, settings.scouting, false));
   }
+  function beginSphereScout(): boolean {
+    const t = Date.now(), checked = expireAttempt(attempt, settings.gameOver, t);
+    if (checked.failure || checked.game.finishedAt !== null) { setAttempt(checked); setNow(t); return false; }
+    if (!canScout(scoutState, settings.scouting, false)) return false;
+    setScoutState(s => s.active ? s : toggleScout(s, settings.scouting, false));
+    return true;
+  }
   function toggleReveal() { setReveal(v => !v); setAssisted(true); }
   const overviewPositions = useMemo(() => {
     const ids = new Set(analysis.reachableCellIds.flatMap(id => disk(puzzle.cells[id], 1).map(key)));
@@ -111,7 +134,7 @@ export default function App() {
     <header className="site-header"><a className="brand" href="./" aria-label="Hex Number Maze home"><span className="brand-icon">⬡</span><span>hex<span className="brand-dot">.</span></span></a><span className="header-caption">A LITTLE MAZE. A LITTLE MIND SPACE.</span><button className="icon-button" onClick={() => setHelp(v => !v)} aria-expanded={help} aria-label="How to play">?</button></header>
     <main>
       <div className="intro"><span className="eyebrow"><span className="tiny-dot"/> THE NUMBER MAZE</span><h1>One number at a time.</h1><p>Follow the sequence. Find your way.</p></div>
-      {help && <aside className="help-panel"><strong>A small world, a few simple rules.</strong><p>Start at 1 and tap a neighboring number exactly one higher. Orange outlines show your next choices. Tap the blue outlined hex to retrace one step. Every step counts, including going back.</p><p>You can see {settings.visibleRings} rings around you. {settings.scouting !== 'none' && 'Scout reveals one extra ring until your next move.'} {settings.scouting === 'once' && 'You may scout only once per run.'} The timer starts on your first move. Reach {puzzle.target} to finish.</p></aside>}
+      {help && <aside className="help-panel"><strong>A small world, a few simple rules.</strong><p>Start at 1 and tap a neighboring number exactly one higher. Orange outlines show your next choices. Tap the blue outlined hex to retrace one step. Every step counts, including going back.</p><p>You can see {settings.visibleRings} rings around you. {settings.scouting !== 'none' && (rendererMode === 'sphere' ? 'Drag the ball to scout hidden cells, then return to the player.' : 'Scout reveals one extra ring until your next move.')} {settings.scouting === 'once' && 'You may scout only once per run.'} The timer starts on your first move. Reach {puzzle.target} to finish.</p></aside>}
       <section className="lab-panel" aria-label="Game Lab configuration">
         <div className="panel-heading"><h2>Game Lab</h2><span className="eyebrow">DEVELOPMENT SETTINGS</span></div>
         <form onSubmit={e => { e.preventDefault(); applySettings(); }}>
@@ -127,6 +150,7 @@ export default function App() {
         <p className="muted">Applying settings restarts the attempt on the same seed. Visibility, scouting, scoring, and game-over rules keep the exact board; changing the target creates a different board from that seed.</p>
         <p className="seed-caption">Seed: <code>{puzzle.seed}</code></p>
       </section>
+      <RendererControls mode={rendererMode} onMode={setRendererMode} settings={sphereSettings} onSettings={setSphereSettings}/>
       <section className="game-card" aria-label="Number maze game">
         <div className="game-topline"><span className="puzzle-label">EXPLORATION <span>/ {puzzle.target}</span></span><span className="live-pill"><span/> {complete ? 'Complete' : failure ? 'Game over' : 'In play'}</span></div>
         <div className="primary-score" aria-label="Primary score"><span>{settings.primaryScore}</span><strong>{settings.primaryScore === 'mistakes' ? mistakes : settings.primaryScore === 'moves' ? game.moves : formatTime(ms)}</strong><small>Lower is better</small></div>
@@ -134,29 +158,19 @@ export default function App() {
         <p className="active-settings">{settings.visibleRings} rings · Scouting: {SCOUT_LABELS[settings.scouting]} · {mistakes} mistakes · {GAME_OVER_LABELS[settings.gameOver]}</p>
         <div className="stats"><div><span className="stat-label">CURRENT</span><div className="stat-number current-stat">{active.value}<span> / {puzzle.target}</span></div></div><div><span className="stat-label">MOVES</span><div className="stat-number">{game.moves.toString().padStart(2, '0')}</div></div><div><span className="stat-label">{limit === null ? 'TIME' : 'TIME LEFT'}</span><div className="stat-number time-stat">{formatTime(remaining === null ? ms : Math.ceil(remaining / 1000) * 1000)}</div></div></div>
         <div className="board-wrap">
-          <svg className="board" viewBox={`${-235 * boardScale} ${-218 * boardScale} ${470 * boardScale} ${436 * boardScale}`} role="group" aria-label={`Hexagonal maze. Current number ${active.value}. Reach ${puzzle.target}.`}>
-            {visible.map(h => {
-              const id = key(h), cell = h, kind = ended ? null : moveKind(puzzle, game, id), isActive = id === activeId;
-              const { x, y } = pixel({ q: h.q - active.q, r: h.r - active.r }, 46);
-              const visited = game.path.includes(id), isSolution = reveal && solution.has(id);
-              const label = `${cell?.value ?? 'Empty'}, ${isActive ? 'current position' : kind === 'back' ? 'backtrack' : kind === 'forward' ? 'move forward' : 'unavailable'}`;
-              return <g key={id} transform={`translate(${x},${y})`} role="button" aria-label={label} aria-disabled={!kind} tabIndex={kind ? 0 : -1}
-                onClick={() => step(id)} onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && kind) { e.preventDefault(); step(id); } }}
-                className={`hex ${isActive ? 'active' : kind === 'back' ? 'back' : kind === 'forward' ? 'next' : visited ? 'visited' : 'quiet'} ${isSolution ? 'solution' : ''}`}>
-                <polygon points={points(42)} />
-                <text textAnchor="middle" dominantBaseline="central" y={isActive ? -3 : 0}>{cell?.value ?? '·'}</text>
-                {isActive && <circle cy="22" r="2.4" className="position-dot"/>}
-                {isSolution && !isActive && <circle cy="24" r="3" className="solution-dot"/>}
-              </g>;
-            })}
-          </svg>
+          {rendererMode === 'flat' ? <FlatBoard cells={boardCells} center={active} radius={viewRadius} resetKey={runId} onMove={step}/> :
+            <Suspense fallback={<p className="renderer-loading">Loading spherical renderer…</p>}><SphereBoard cells={boardCells} center={active} radius={viewRadius} resetKey={runId} onMove={step} settings={sphereSettings} scout={{ active: scouting && !ended, available: canScout(scoutState, settings.scouting, ended), cells: scoutCells, onStart: beginSphereScout }} onFallback={()=>setRendererMode('flat')}/></Suspense>}
           <div className="board-caption" role="status">{complete ? 'You found your way.' : failure ? (failure.reason === 'timeout' ? 'Time is up.' : failure.reason === 'dead-end' ? 'A dead end. Game over.' : 'A wrong turn. Game over.') : legalNext.length ? <>Next up: <strong>{active.value + 1}</strong><span className="caption-dot">·</span>{legalNext.length > 1 ? `${legalNext.length} paths to explore` : 'Keep exploring'}</> : <>A dead end. <strong>Retrace your steps.</strong></>}</div>
         </div>
-        {settings.scouting !== 'none' && <div className="scout-control"><button className="secondary-button" onClick={scout} disabled={!canScout(scoutState, settings.scouting, ended)} aria-pressed={scouting}>{scouting ? 'End scout' : settings.scouting === 'once' && scouts > 0 ? 'Scout used' : 'Scout +1 ring'}</button><span>{settings.scouting === 'once' ? `${Math.max(0, 1 - scouts)} of 1 scout remaining` : `${scouts} scout uses`} · no move cost</span></div>}
+        {settings.scouting !== 'none' && <div className="scout-control"><button className="secondary-button" onClick={scout} disabled={!canScout(scoutState, settings.scouting, ended)} aria-pressed={scouting}>{scouting ? (rendererMode === 'sphere' ? 'Return to player' : 'End scout') : settings.scouting === 'once' && scouts > 0 ? 'Scout used' : rendererMode === 'sphere' ? 'Scout by dragging' : 'Scout +1 ring'}</button><span>{settings.scouting === 'once' ? `${Math.max(0, 1 - scouts)} of 1 scout remaining` : `${scouts} scout uses`} · no move cost</span></div>}
+        {rendererMode === 'sphere' && settings.scouting !== 'none' && <p className="score-definition">{scouting ? 'Drag to inspect hidden cells. Release to look; Return to player to resume moves.' : 'Click and drag the ball to scout. A normal tap still moves.'} The view can roll up to {SCOUT_REACH} hex steps from the player.</p>}
         <div className="legend"><span><i className="legend-current"/>You are here</span><span><i className="legend-next"/>Next number</span><span><i className="legend-back"/>Way back</span></div>
         <div className="game-actions"><button className="secondary-button" disabled={!previous || ended} onClick={() => step(previous)}>← <span>Step back</span></button><button className="primary-button" onClick={() => start(freshSeed(), puzzle.target)}>New game <span>↗</span></button></div>
       </section>
       {ended && <section className="completion" aria-live="polite"><span className="eyebrow">{complete ? 'MAZE COMPLETE' : 'GAME OVER'}</span><h2>{complete ? 'A little persistence. A path found.' : failure?.reason === 'timeout' ? 'Time is up.' : failure?.reason === 'dead-end' ? 'No way forward. You reached a dead end.' : 'One wrong turn ends this run.'}</h2><p>{mistakes} mistakes · {game.moves} moves · {formatTime(ms)} · {game.backtracks} steps back</p><p>{complete ? (game.moves === analysis.minimumMoves ? 'A perfect route.' : `${game.moves - analysis.minimumMoves!} moves beyond the shortest route.`) : 'Try again with the same seed.'} {assisted && 'Solution assisted.'}</p><button className="secondary-button" onClick={() => resetAttempt()}>Retry same seed</button><label htmlFor="feedback">How did this one feel?</label><textarea id="feedback" placeholder="A fair wrong turn? A memorable choice? Worth another go?" value={feedback} onChange={e => { setFeedback(e.target.value); setRecords(rs => rs.map(r => r.id === runId ? { ...r, feedback: e.target.value } : r)); }}/><small>Saved on this device when browser storage is available.</small></section>}
+      {rendererMode === 'sphere' && <div className="probe-toggle"><label><input type="checkbox" checked={probe} onChange={e=>setProbe(e.target.checked)}/> Renderer-only six-direction navigation test</label>
+        {probe && <Suspense fallback={<p>Loading test surface…</p>}><NavigationProbe settings={sphereSettings} onFallback={()=>setRendererMode('flat')}/></Suspense>}
+      </div>}
       <p className="under-note">Not every way forward leads to the finish.<br/>Getting a little lost is part of it.</p>
       <div className="developer-toggle"><button onClick={() => setDeveloper(v => !v)} aria-expanded={developer}><span className="code-mark">⌘</span> Developer mode <span className={`switch ${developer ? 'on' : ''}`}/></button><span>GENERATOR v1</span></div>
       {developer && <section className="developer-panel"><div className="panel-heading"><div><span className="eyebrow">UNDER THE SURFACE</span><h2>Puzzle workbench</h2></div><button className="text-button" onClick={() => download(`hex-${puzzle.seed}.json`, { puzzle, analysis, settings })}>Export puzzle ↗</button></div>
